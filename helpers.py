@@ -1,6 +1,8 @@
 from dotenv import load_dotenv
 import os
 import requests
+import subprocess
+import json
 
 load_dotenv()
 
@@ -18,15 +20,15 @@ POLICY_DIR = './policy'
 Gets the policy ID.
 
 Returns:
-    The policy ID.
-
-Raises:
-    FileNotFoundError: Raised when the policyID file is not found.
+    The policy ID or False if the policy ID was not found.
 """
 def get_policy_id():
-    with open(f'{POLICY_DIR}/policyID', 'r') as file:
-        policy_id = file.readline().strip()
-    return policy_id
+    try:
+        with open(f'{POLICY_DIR}/policyID', 'r') as file:
+            policy_id = file.readline().strip()
+        return policy_id
+    except FileNotFoundError:
+        return False
 
 """
 Adds the given image to IPFS.
@@ -70,7 +72,7 @@ Args:
 Returns:
     The response of the Blockfrost API.
 """
-def get_mint_address(tx_hash):
+def get_mint_address(tx_hash, chain='testnet-magic'):
     response = requests.get(
         API_URL + TRANSACTION_ENDPOINT.format(tx_hash), 
         headers={'project_id':os.getenv('PROJECT_ID')}
@@ -81,12 +83,38 @@ def get_mint_address(tx_hash):
 Gets the local stored Cardano address.
 
 Returns:
-    The address.
-
-Raises:
-    FileNotFoundError: Raised when the address file is not found.
+    The address or False if the address is not found.
 """
 def get_address():
-    with open(ADDRESS_DIR, 'r') as file:
-        address = file.readline().strip()
-    return address
+    try:
+        with open(ADDRESS_DIR, 'r') as file:
+            address = file.readline().strip()
+        return address
+    except FileNotFoundError:
+        return False
+
+"""
+Gets the current slot number of the Cardano chain.
+
+Args:
+    chain: The Cardano chain.
+
+Returns:
+    The current slot number.
+"""
+def get_slot_number(chain):
+    args = ['cardano-cli', 'query', 'tip', f'--{chain}']
+
+    if chain == 'testnet-magic':
+        args.append(MAGIC)
+
+    try:
+        output = subprocess.run(args, capture_output=True).stdout.decode()
+    except subprocess.CalledProcessError:
+        return False
+
+    try:
+        slot_number = json.loads(output)['slot']
+        return slot_number
+    except KeyError:
+        return False

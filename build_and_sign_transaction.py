@@ -1,34 +1,11 @@
+import re
 from generate_metadata import METADATA_DIR, generate_metadata
-from helpers import POLICY_DIR, MAGIC, get_policy_id
+from helpers import POLICY_DIR, MAGIC, get_slot_number, get_policy_id
 import subprocess
-import json
 
 OUT_DIR = './matx'
 REFUND_DIR = './refund'
 SLOT_MARGIN = 10000
-
-"""
-Gets the current slot number of the Cardano chain.
-
-Args:
-    chain: The Cardano chain.
-
-Returns:
-    The current slot number.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
-"""
-def get_slot_number(chain):
-    args = ['cardano-cli', 'query', 'tip', f'--{chain}']
-
-    if chain == 'testnet-magic':
-        args.append(MAGIC)
-
-    output = subprocess.run(args, capture_output=True).stdout.decode()
-    slot_number = json.loads(output)['slot']
-    return slot_number
 
 """
 Builds the minting transaction.
@@ -44,52 +21,60 @@ Args:
 
 Returns:
     A boolean indicating whether the transaction was successful.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
 """
-def build_transaction(tx_hash, tx_ix, addr_in, addr_out, id, output='1400000', chain='testnet-magic'):
+def build_transaction(tx_hash, tx_ix, addr_in, addr_out, id ,output='1400000', chain='testnet-magic'):
     args = ['cardano-cli', 'transaction', 'build', f'--{chain}']
 
     if chain == 'testnet-magic':
         args.append(MAGIC)
 
-    args.append('--many-era')
+    args.append('--alonzo-era')
     args.append('--tx-in')
     args.append(f'{tx_hash}#{tx_ix}')
     args.append('--tx-out')
 
     metadata = generate_metadata(id)
     policy_id = get_policy_id()
-    token_name = list(metadata['721'][policy_id].keys())[0].encode('utf-8').hex()
 
-    args.append(f'{addr_in}+{output}+"1 {policy_id}.{token_name}"')
-    args.append('--change-address')
-    args.append(addr_out)
-    args.append(f'--mint="1 {policy_id}.{token_name}"')
-    args.append('--minting-script-file')
-    args.append(f'{POLICY_DIR}/policy.script')
-    args.append('--metadata-json-file')
-    args.append(f'{METADATA_DIR}/metadata{id}.json')
-    args.append('--invalid-hereafter')
+    if policy_id:
+        token_name = list(metadata['721'][policy_id].keys())[0].encode('utf-8').hex()
 
-    slot_number = get_slot_number()
-    args.append(f'{slot_number+SLOT_MARGIN}')
+        args.append(f'{addr_in}+{output}+"1 {policy_id}.{token_name}"')
+        args.append('--change-address')
+        args.append(addr_out)
+        args.append(f'--mint="1 {policy_id}.{token_name}"')
+        args.append('--minting-script-file')
+        args.append(f'{POLICY_DIR}/policy.script')
+        args.append('--metadata-json-file')
+        args.append(f'{METADATA_DIR}/metadata{id}.json')
+        args.append('--invalid-hereafter')
 
-    args.append('--witness-override')
-    args.append('2')
-    args.append('--out-file')
-    args.append(f'{OUT_DIR}/matx{id}.raw')
-    # Introduce error checking here
-    res = subprocess.run(args, capture_output=True).stdout.decode()
-    res_split = res.split(':')
+        slot_number = get_slot_number(chain)
 
-    if res_split[0] == 'Minimum required UTxO':
-        output = res_split[1].split()[1]
-        return build_transaction(tx_hash, tx_ix, addr_in, addr_out, id, output, chain)
-    elif res_split[0] == 'Estimated transaction fee':
-        return True
+        if slot_number:
+            args.append(f'{slot_number+SLOT_MARGIN}')
+
+            args.append('--witness-override')
+            args.append('2')
+            args.append('--out-file')
+            args.append(f'{OUT_DIR}/matx{id}.raw')
+            
+            try:
+                res = subprocess.run(args, capture_output=True).stdout.decode()
+            except subprocess.CalledProcessError:
+                return False
+
+            res_split = res.split(':')
+
+            if res_split[0] == 'Minimum required UTxO':
+                output = res_split[1].split()[1]
+                return build_transaction(tx_hash, tx_ix, addr_in, addr_out, id, output, chain)
+            elif res_split[0] == 'Estimated transaction fee':
+                return True
+        else:
+            print('Error when getting slot number...')
+    else:
+        print('Error when getting policy ID...')
     
     return False
 
@@ -102,10 +87,6 @@ Args:
 
 Returns:
     A boolean indicating whether the transaction was successful.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
 """
 def sign_transaction(id, chain='testnet-magic'):
     args = ['cardano-cli', 'transaction', 'sign', '--signing-key-file', 'payment.skey', 
@@ -118,9 +99,17 @@ def sign_transaction(id, chain='testnet-magic'):
     args.append(f'{OUT_DIR}/matx{id}.raw')
     args.append('--out-file')
     args.append(f'{OUT_DIR}/matx{id}.signed')
-    # Introduce error checking here
-    subprocess.run(args)
-    return True
+    
+    try:
+        res = subprocess.run(args, capture_output=True).stderr.decode()
+
+        if res:
+            print(res)
+            return False
+
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 """
 Submits a transaction to the Cardano blockchain.
@@ -131,10 +120,6 @@ Args:
 
 Returns:
     A boolean indicating whether the transaction was successful.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
 """
 def submit_transaction(tx_file_path, chain='testnet-magic'):
     args = ['cardano-cli', 'transaction', 'submit', '--tx-file', 
@@ -142,9 +127,17 @@ def submit_transaction(tx_file_path, chain='testnet-magic'):
 
     if chain == 'testnet-magic':
         args.append(MAGIC)
-    # Introduce error checking here
-    res = subprocess.run(args, capture_output=True)
-    return True
+    
+    try:
+        res = subprocess.run(args, capture_output=True)
+        
+        if res.stdout.decode().strip() == 'Transaction successfully submitted.':
+            return True
+        
+        print(res.stderr.decode())
+        return False
+    except subprocess.CalledProcessError:
+        return False
 
 """
 Calculates the fee for a refund transaction.
@@ -158,20 +151,24 @@ Args:
     chain: The Cardano chain.
 
 Returns:
-    The transaction fee in Lovelace.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status   
+    The transaction fee in Lovelace or False if the calculation was not successful.
 """
-def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, addr_out, output, chain='testnet-magic'):
+def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, output, chain='testnet-magic'):
     raw_args = ['cardano-cli', 'transaction', 'build-raw', '--tx-in', f'{tx_hash}#{tx_ix}',
-        '--tx-out', f'{addr_in}+{output}', '--tx-out', f'{addr_out}+0', '--ttl', '0', 
-        '--fee', '0', '--out-file', f'{REFUND_DIR}/tx{tx_ix}.raw']
-    subprocess.run(raw_args)
+        '--tx-out', f'{addr_in}+{output}', '--ttl', '0', '--fee', '0', '--out-file', 
+        f'{REFUND_DIR}/tx{tx_ix}.raw']
+    
+    try:
+        raw_res = subprocess.run(raw_args, capture_output=True).stderr.decode()
+
+        if raw_res:
+            print(raw_res)
+            return False
+    except subprocess.CalledProcessError:
+        return False
 
     fee_args = ['cardano-cli', 'transaction', 'calculate-min-fee', '--tx-body-file', 
-        f'{REFUND_DIR}/tx{tx_ix}.raw', '--tx-in-count', '1', '--tx-out-count', '2',
+        f'{REFUND_DIR}/tx{tx_ix}.raw', '--tx-in-count', '1', '--tx-out-count', '1',
         '--witness-count', '1', '--byron-witness-count', '0', f'--{chain}']
     
     if chain == 'testnet-magic':
@@ -179,11 +176,19 @@ def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, addr_out, output, 
     
     fee_args.append('--protocol-params-file')
     fee_args.append('protocol.json')
-    # Introduce error checking here
-    res = subprocess.run(fee_args, capture_output=True).stdout.decode()
-    fee = res.split()[0]
+    
+    try:
+        fee_res = subprocess.run(fee_args, capture_output=True)
 
-    return fee
+        if fee_res.stderr.decode():
+            print(fee_res.stderr.decode())
+            return False
+        
+        fee = fee_res.split()[0]
+        return fee
+        
+    except subprocess.CalledProcessError:
+        return False
 
 """
 Builds the refund transaction.
@@ -198,19 +203,28 @@ Args:
 
 Returns:
     A boolean indicating whether the transaction was successful.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
 """
 def build_refund_transaction(tx_hash, tx_ix, addr_in, output, fee, chain='testnet-magic'):
     slot_number = get_slot_number(chain)
+
+    if not slot_number:
+        print('Error getting slot number...')
+        return False
+
     args = ['cardano-cli', 'transaction', 'build-raw', '--tx-in', f'{tx_hash}#{tx_ix}', 
         '--tx-out', f'{addr_in}+{output}', '--ttl', f'{slot_number+SLOT_MARGIN}', 
         '--fee', fee, '--out-file', f'{REFUND_DIR}/tx{tx_ix}.raw']
-    # Introduce error checking here
-    res = subprocess.run(args, capture_output=True)
-    return True
+    
+    try:
+        res = subprocess.run(args, capture_output=True).stderr.decode()
+
+        if res:
+            print(res)
+            return False
+        
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 """
 Signs the refund transaction.
@@ -221,10 +235,6 @@ Args:
 
 Returns:
     A boolean indicating whether the transaction was successful.
-
-Raises:
-    subprocess.CalledProcessError: Raised when the subprocess.run() function 
-    returns a non-zero exit status
 """
 def sign_refund_transaction(tx_ix, chain='testnet-magic'):
     args = ['cardano-cli', 'transaction', 'sign', '--tx-body-file', 
@@ -236,11 +246,14 @@ def sign_refund_transaction(tx_ix, chain='testnet-magic'):
     
     args.append('--out-file')
     args.append(f'{REFUND_DIR}/tx{tx_ix}.signed')
-    # Introduce error checking here
-    res = subprocess.run(args, capture_output=True)
-    return True
-
-
-
-
     
+    try:
+        res = subprocess.run(args, capture_output=True).stderr.decode()
+
+        if res:
+            print(res)
+            return False
+
+        return True
+    except subprocess.CalledProcessError:
+        return False
