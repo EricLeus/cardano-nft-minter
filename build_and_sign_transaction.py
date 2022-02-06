@@ -1,4 +1,3 @@
-import re
 from generate_metadata import METADATA_DIR, generate_metadata
 from helpers import POLICY_DIR, MAGIC, get_slot_number, get_policy_id
 import subprocess
