@@ -10,6 +10,15 @@ NAME = 'TokenFund'
 DESCRIPTION = 'The holder of this NFT receives monthly dividends from the Token Fund'
 TYPE = 'Angel'
 
+"""
+Generates the metadata for an NFT.
+
+Args:
+    id: The ID of the NFT.
+
+Returns:
+    The metadata of the NFT in JSON format.
+"""
 def generate_metadata(id):
     if os.path.isfile(f'{METADATA_DIR}/metadata{id}.json'):
         with open(f'{METADATA_DIR}/metadata{id}.json', 'r') as file:
