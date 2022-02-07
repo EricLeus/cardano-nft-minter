@@ -1,5 +1,5 @@
 # cardano-nft-minter
-Allows automatic minting of NFTs without smart contracts.
+Allows automatic minting of CNFTs without smart contracts.
 ## How to Use
 1. Add an img folder with the potential NFT images
 2. Add an empty policy, refund, metadata, and matx folder
