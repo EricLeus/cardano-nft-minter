@@ -1,5 +1,17 @@
 .env
+payment.skey
+payment.vkey
 payment.addr
+payment1.skey
+payment1.vkey
+payment1.addr
+payment2.skey
+payment2.vkey
+payment2.addr
+payment3.skey
+payment3.vkey
+payment3.addr
+protocol.json
 __pycache__/
 img/
 matx/

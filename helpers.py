@@ -72,7 +72,7 @@ Args:
 Returns:
     The response of the Blockfrost API.
 """
-def get_mint_address(tx_hash, chain='testnet-magic'):
+def get_mint_address(tx_hash):
     response = requests.get(
         API_URL + TRANSACTION_ENDPOINT.format(tx_hash), 
         headers={'project_id':os.getenv('PROJECT_ID')}
@@ -102,7 +102,7 @@ Args:
 Returns:
     The current slot number.
 """
-def get_slot_number(chain):
+def get_slot_number(chain='testnet-magic'):
     args = ['cardano-cli', 'query', 'tip', f'--{chain}']
 
     if chain == 'testnet-magic':
@@ -115,6 +115,6 @@ def get_slot_number(chain):
 
     try:
         slot_number = json.loads(output)['slot']
-        return slot_number
+        return int(slot_number)
     except KeyError:
         return False

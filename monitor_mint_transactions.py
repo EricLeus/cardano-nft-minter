@@ -9,6 +9,11 @@ import json
 
 FEE = '100000000'
 VALID_CHAINS = ['testnet-magic', 'mainnet']
+# Manually generated test addresses in local directory
+TEST_ADDRESSES = [
+    'addr_test1vrpffsusclp4vfkp902he90zl2rha4lyjd8c94wcj2uz9jqydpd5f',
+    'addr_test1vpv9z3x4eg7mn50dtdg5z9w369qwnmtpsz8km327vn49cqs4qmpej',
+    'addr_test1vz4yn0dplvj77v9ds8ysacmqj69jchm57y5ttmgpgwcyrfc85smgy']
 
 """
 Creates a policy.script file.
@@ -43,7 +48,7 @@ def create_policy(mintable_time, chain='testnet-magic'):
             print(res.stderr.decode())
             return False
         
-        key_hash = res.stdout.decode()
+        key_hash = res.stdout.decode().strip()
     except subprocess.CalledProcessError:
         return False
     
@@ -57,7 +62,23 @@ def create_policy(mintable_time, chain='testnet-magic'):
 
         with open(f'{POLICY_DIR}/policy.script', 'w') as file:
             json.dump(policy, file)
-        return True
+        
+        id_args = ['cardano-cli', 'transaction', 'policyid', '--script-file', 
+            f'{POLICY_DIR}/policy.script']
+        
+        try:
+            res = subprocess.run(id_args, capture_output=True)
+
+            if res.stderr.decode():
+                print(res.stderr.decode())
+                return False
+            
+            with open(f'{POLICY_DIR}/policyID', 'w') as file:
+                file.write(res.stdout.decode().strip())
+
+            return True
+        except subprocess.CalledProcessError:
+            return False
     else:
         print('Error getting slot number...')
         return False
@@ -93,7 +114,6 @@ Finds the next minting transaction.
 
 Args:
     tx_info: The unparsed transaction info in string format.
-    past_tx: The previous minting transaction.
 
 Returns:
     The transaction hash (None if no new minting transactions) and tx_ix
@@ -101,21 +121,20 @@ Returns:
 Raises:
     IndexError: Raised when the tx_info is incorrectly formatted.
 """
-def find_next_transaction(tx_info, past_tx):
+def find_next_transaction(tx_info):
     split_info = tx_info.split()
 
     for x in range(0,len(split_info)):
         if len(split_info[x]) == 64:
             tx_hash = split_info[x]
+
             tx_ix = int(split_info[x+1])
+            amount = split_info[x+2]
 
-            if tx_ix > past_tx:
-                amount = split_info[x+2]
+            if amount == FEE:
+                return tx_hash, tx_ix
 
-                if amount == FEE:
-                    return tx_hash, tx_ix
-
-    return None, past_tx
+    return None, None
 
 """
 Monitors for minting transactions and executes them.
@@ -123,13 +142,12 @@ Monitors for minting transactions and executes them.
 Args:
     id: The starting ID for the new NFTs.
     total_mint: The total number of new NFTs to mint.
-    chain: The Cardano chain.
-    tx_ix: The exclusive lower bound for which tx_ix's to monitor. 
+    chain: The Cardano chain. 
 
 Returns:
-    The tx_ix of the last minting transaction or False if there was an error getting the address.
+    A boolean indicating whether the minting was successful.
 """
-def monitor(id, total_mint, chain='testnet-magic', tx_ix=-1):
+def monitor(id, total_mint, chain='testnet-magic'):
     address = get_address()
 
     if not address:
@@ -141,10 +159,13 @@ def monitor(id, total_mint, chain='testnet-magic', tx_ix=-1):
 
         if tx_info:
             try:
-                tx_hash, tx_ix = find_next_transaction(tx_info, tx_ix)
+                tx_hash, tx_ix = find_next_transaction(tx_info)
 
                 if tx_hash:
-                    tx_response = get_mint_address(tx_hash, chain)
+                    if chain == 'testnet-magic':
+                        tx_response = {'inputs': [{'address': TEST_ADDRESSES[id-1]}]}
+                    else:
+                        tx_response = get_mint_address(tx_hash, chain)
 
                     if 'error' not in tx_response:
                         mint_address = tx_response['inputs'][0]['address']
@@ -153,7 +174,6 @@ def monitor(id, total_mint, chain='testnet-magic', tx_ix=-1):
                             if sign_transaction(id, chain):
                                 if submit_transaction(f'{OUT_DIR}/matx{id}.signed', chain):
                                     id+=1
-                                    continue
                                 else:
                                     print('Error submitting mint transaction...')
                             else:
@@ -172,20 +192,20 @@ def monitor(id, total_mint, chain='testnet-magic', tx_ix=-1):
         
         time.sleep(15)
     
-    return tx_ix
+    return True
 
 """
 Monitors for late minters and refunds them.
 
 Args:
-    tx_ix: The last valid minting tx_ix.
+    past_tx: The previous minting transaction.
     refund_time: The time in seconds to monitor for late minters.
     chain: The Cardano chain.
 
 Returns:
     A boolean indicating whether the total refund time has been met.
 """
-def refund_late_minters(tx_ix, refund_time=14400, chain='testnet-magic'):
+def refund_late_minters(refund_time=14400, chain='testnet-magic'):
     start = time.time()
     address = get_address()
 
@@ -198,10 +218,13 @@ def refund_late_minters(tx_ix, refund_time=14400, chain='testnet-magic'):
 
         if tx_info:
             try:
-                tx_hash, tx_ix = find_next_transaction(tx_info, tx_ix)
+                tx_hash, tx_ix = find_next_transaction(tx_info)
 
                 if tx_hash:
-                    tx_response = get_mint_address(tx_hash)
+                    if chain == 'testnet-magic':
+                        tx_response = {'inputs': [{'address': TEST_ADDRESSES[2]}]}
+                    else:
+                        tx_response = get_mint_address(tx_hash)
 
                     if 'error' not in tx_response:
                         mint_address = tx_response['inputs'][0]['address']
@@ -209,11 +232,9 @@ def refund_late_minters(tx_ix, refund_time=14400, chain='testnet-magic'):
                             FEE, chain)
                         
                         if fee:
-                            if build_refund_transaction(tx_hash, tx_ix, mint_address, int(FEE) - int(fee)):
-                                if sign_refund_transaction(tx_ix, chain):
-                                    if submit_transaction(f'{REFUND_DIR}/tx{tx_ix}.signed', chain):
-                                        continue
-                                    else:
+                            if build_refund_transaction(tx_hash, tx_ix, mint_address, int(FEE) - int(fee), fee):
+                                if sign_refund_transaction(tx_ix, mint_address, chain):
+                                    if not submit_transaction(f'{REFUND_DIR}/tx{mint_address}.signed', chain):
                                         print('Error submitting refund transaction...')
                                 else:
                                     print('Error signing refund transaction...')
@@ -242,13 +263,13 @@ if __name__ == '__main__':
 
     for x in range(0,len(sys.argv)):
         if sys.argv[x] == '--starting-id':
-            starting_id = sys.argv[x+1]
+            starting_id = int(sys.argv[x+1].strip())
         elif sys.argv[x] == '--total-mint': 
-            total_mint = sys.argv[x+1]
+            total_mint = int(sys.argv[x+1].strip())
         elif sys.argv[x] == '--chain':
             chain = sys.argv[x+1]
         elif sys.argv[x] == '--refund-time':
-            refund_time = sys.argv[x+1]
+            refund_time = int(sys.argv[x+1])
         elif sys.argv[x] == '--create-policy':
             if sys.argv[x+1].lower() == 'false':
                 new_policy = False
@@ -259,19 +280,21 @@ if __name__ == '__main__':
     assert chain in VALID_CHAINS, f'Invalid argument for chain: {chain}'
     assert total_mint >= 1, f'Invalid argument for total mint: {total_mint}'
     assert refund_time >= 0, f'Invalid argument for refund time: {refund_time}'
-    assert mintable_time > 0, f'Invalid argument for mintable time: {mintable_time}'
+
+    if new_policy:
+        assert mintable_time > 0, f'Invalid argument for mintable time: {mintable_time}'
     
     if new_policy:
         policy_status = create_policy(mintable_time, chain)
 
     if not new_policy or policy_status:
-        tx_ix = monitor(starting_id, total_mint, chain)
+        res_monitor = monitor(starting_id, total_mint, chain)
 
-        if tx_ix:
+        if res_monitor:
             print('Minting has ended!')
-            res = refund_late_minters(tx_ix, refund_time, chain)
+            res_refund = refund_late_minters(refund_time, chain)
 
-            if res:
+            if res_refund:
                 print('Refunds have ended.')
     else:
         print('Error creating policy.script...')

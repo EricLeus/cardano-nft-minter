@@ -33,15 +33,19 @@ def build_transaction(tx_hash, tx_ix, addr_in, addr_out, id ,output='1400000', c
     args.append('--tx-out')
 
     metadata = generate_metadata(id)
+
+    if not metadata:
+        print('Error getting metadata...')
+        return False
+        
     policy_id = get_policy_id()
 
     if policy_id:
         token_name = list(metadata['721'][policy_id].keys())[0].encode('utf-8').hex()
-
-        args.append(f'{addr_in}+{output}+"1 {policy_id}.{token_name}"')
+        args.append(f'{addr_in}+{output}+1 {policy_id}.{token_name}')
         args.append('--change-address')
         args.append(addr_out)
-        args.append(f'--mint="1 {policy_id}.{token_name}"')
+        args.append(f'--mint=1 {policy_id}.{token_name}')
         args.append('--minting-script-file')
         args.append(f'{POLICY_DIR}/policy.script')
         args.append('--metadata-json-file')
@@ -59,11 +63,15 @@ def build_transaction(tx_hash, tx_ix, addr_in, addr_out, id ,output='1400000', c
             args.append(f'{OUT_DIR}/matx{id}.raw')
             
             try:
-                res = subprocess.run(args, capture_output=True).stdout.decode()
+                res = subprocess.run(args, capture_output=True)
+
+                if res.stderr.decode():
+                    print(res.stderr.decode())
+                    return False
             except subprocess.CalledProcessError:
                 return False
 
-            res_split = res.split(':')
+            res_split = res.stdout.decode().split(':')
 
             if res_split[0] == 'Minimum required UTxO':
                 output = res_split[1].split()[1]
@@ -155,7 +163,7 @@ Returns:
 def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, output, chain='testnet-magic'):
     raw_args = ['cardano-cli', 'transaction', 'build-raw', '--tx-in', f'{tx_hash}#{tx_ix}',
         '--tx-out', f'{addr_in}+{output}', '--ttl', '0', '--fee', '0', '--out-file', 
-        f'{REFUND_DIR}/tx{tx_ix}.raw']
+        f'{REFUND_DIR}/tx{addr_in}.raw']
     
     try:
         raw_res = subprocess.run(raw_args, capture_output=True).stderr.decode()
@@ -167,7 +175,7 @@ def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, output, chain='tes
         return False
 
     fee_args = ['cardano-cli', 'transaction', 'calculate-min-fee', '--tx-body-file', 
-        f'{REFUND_DIR}/tx{tx_ix}.raw', '--tx-in-count', '1', '--tx-out-count', '1',
+        f'{REFUND_DIR}/tx{addr_in}.raw', '--tx-in-count', '1', '--tx-out-count', '1',
         '--witness-count', '1', '--byron-witness-count', '0', f'--{chain}']
     
     if chain == 'testnet-magic':
@@ -183,7 +191,7 @@ def calculate_refund_transaction_fee(tx_hash, tx_ix, addr_in, output, chain='tes
             print(fee_res.stderr.decode())
             return False
         
-        fee = fee_res.split()[0]
+        fee = fee_res.stdout.decode().split()[0]
         return fee
         
     except subprocess.CalledProcessError:
@@ -212,7 +220,7 @@ def build_refund_transaction(tx_hash, tx_ix, addr_in, output, fee, chain='testne
 
     args = ['cardano-cli', 'transaction', 'build-raw', '--tx-in', f'{tx_hash}#{tx_ix}', 
         '--tx-out', f'{addr_in}+{output}', '--ttl', f'{slot_number+SLOT_MARGIN}', 
-        '--fee', fee, '--out-file', f'{REFUND_DIR}/tx{tx_ix}.raw']
+        '--fee', fee, '--out-file', f'{REFUND_DIR}/tx{addr_in}.raw']
     
     try:
         res = subprocess.run(args, capture_output=True).stderr.decode()
@@ -230,21 +238,22 @@ Signs the refund transaction.
 
 Args:
     tx_ix: The input tx_ix.
+    addr_in: The address which requested to mint.
     chain: The Cardano chain.
 
 Returns:
     A boolean indicating whether the transaction was successful.
 """
-def sign_refund_transaction(tx_ix, chain='testnet-magic'):
+def sign_refund_transaction(tx_ix, addr_in, chain='testnet-magic'):
     args = ['cardano-cli', 'transaction', 'sign', '--tx-body-file', 
-        f'{REFUND_DIR}/tx{tx_ix}.raw', '--signing-key-file', 'payment.skey',
+        f'{REFUND_DIR}/tx{addr_in}.raw', '--signing-key-file', 'payment.skey',
         f'--{chain}']
 
     if chain == 'testnet-magic':
         args.append(MAGIC)
     
     args.append('--out-file')
-    args.append(f'{REFUND_DIR}/tx{tx_ix}.signed')
+    args.append(f'{REFUND_DIR}/tx{addr_in}.signed')
     
     try:
         res = subprocess.run(args, capture_output=True).stderr.decode()

@@ -7,7 +7,7 @@ IMG_DIR = './img'
 METADATA_DIR = './metadata'
 HASHES_DIR = './hashes.json'
 NAME = 'TokenFund'
-DESCRIPTION = 'The holder of this NFT receives monthly dividends from the Token Fund'
+DESCRIPTION = 'Receives monthly dividends from the Token Fund'
 TYPE = 'Angel'
 
 """
@@ -17,15 +17,14 @@ Args:
     id: The ID of the NFT.
 
 Returns:
-    The metadata of the NFT in JSON format.
+    The metadata of the NFT in JSON format or False.
 """
 def generate_metadata(id):
-    if os.path.isfile(f'{METADATA_DIR}/metadata{id}.json'):
-        with open(f'{METADATA_DIR}/metadata{id}.json', 'r') as file:
-            metadata = json.load(file)
-        return metadata
-        
     policy_id = get_policy_id()
+
+    if not policy_id:
+        print('Error getting policy ID...')
+        return False
 
     metadata = {'721': {policy_id: {}}}
     images = os.listdir(IMG_DIR)
