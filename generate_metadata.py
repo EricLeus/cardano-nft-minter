@@ -1,6 +1,6 @@
 from helpers import add_image_to_ipfs, pin_image_to_ipfs, get_policy_id
 import json
-import random
+import secrets
 import os
 
 IMG_DIR = './img'
@@ -17,7 +17,7 @@ Args:
     id: The ID of the NFT.
 
 Returns:
-    The metadata of the NFT in JSON format or False.
+    The metadata of the NFT in JSON format or False if an error occured.
 """
 def generate_metadata(id):
     policy_id = get_policy_id()
@@ -28,7 +28,7 @@ def generate_metadata(id):
 
     metadata = {'721': {policy_id: {}}}
     images = os.listdir(IMG_DIR)
-    image = images[random.randint(0,len(images)-1)]
+    image = images[secrets.randbelow(len(images))]
 
     try:
         with open(HASHES_DIR, 'r') as file:

@@ -2,6 +2,8 @@ from monitor_mint_transactions import TEST_ADDRESSES, FEE, get_address
 from helpers import get_slot_number
 import subprocess
 
+# Add automatic test address generation
+
 # Update manually
 TX_HASHES = [
     '7bc3bd843e9b3a1a5caba99c04819e5dec18778053754fc57b2fa64ec64a65a3',
